@@ -2,27 +2,32 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'package:csv/csv.dart';
 import 'NorthingsNEastings.dart';
 
 class BusSequences {
 
   late List<BusRoute> routes = [];
 
-  static BusSequences fromCSV(File file) {
+  static BusSequences fromCSV(String csv) {
     BusSequences sequences = BusSequences();
 
-    String fileContent = file.readAsStringSync();
+    List<List<dynamic>> rowsAsListOfValues = const CsvToListConverter().convert(csv);
 
-    List<String> entries = /* Split at "," or "\r\n" */ fileContent.split(RegExp(r',|\r\n'));
-
-    entries.removeRange(0, 11);
+    // entries.removeRange(0, 11);
 
     BusRoute route = BusRoute();
 
-    for (int i = 0; i <= entries.length; i += 11) {
+    int line = 0;
 
-      String rowRouteNumber = entries[i];
-      int rowRouteVariant = int.parse(entries[i + 1]);
+    rowsAsListOfValues.removeAt(0);
+
+    for (List<dynamic> entries in rowsAsListOfValues) {
+
+      line++;
+
+      String rowRouteNumber = entries[0].toString();
+      int rowRouteVariant = entries[1];
 
       // if the route varient is -1, we are on the first row.
       if (route.routeVariant == -1) {
@@ -38,11 +43,15 @@ class BusSequences {
 
       RouteStop stop = RouteStop();
 
-      stop.stopName = entries[i + 6];
-      stop.stopCode = int.parse(entries[i + 3]);
+      stop.stopName = entries[6];
+      try {
+        stop.stopCode = entries[3];
+      } catch (e) {
+        stop.stopCode = -2;
+      }
 
-      double northing = double.parse(entries[i + 8]);
-      double easting = double.parse(entries[i + 7]);
+      double northing = entries[8].toDouble();
+      double easting = entries[7].toDouble();
       List<double> latLong = OSGrid.toLatLong(northing, easting);
 
       stop.latitude = latLong[0];
@@ -50,14 +59,38 @@ class BusSequences {
 
       route.busStops.add(stop);
 
-      print(stop.toString());
+      // print(stop.toString());
     }
 
+    // Sort routes by route number
+    sequences.routes.sort((a, b) {
+      bool aIsNumeric = RegExp(r'^\d+$').hasMatch(a.routeNumber);
+      bool bIsNumeric = RegExp(r'^\d+$').hasMatch(b.routeNumber);
+
+      if (aIsNumeric && !bIsNumeric) {
+        return -1; // Place pure numeric routes first
+      } else if (!aIsNumeric && bIsNumeric) {
+        return 1; // Place pure numeric routes first
+      } else {
+        int aNumber = int.tryParse(a.routeNumber.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+        int bNumber = int.tryParse(b.routeNumber.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+
+        if (aNumber == bNumber) {
+          return a.routeNumber.compareTo(b.routeNumber);
+        }
+
+        return aNumber - bNumber;
+      }
+    });
+
+    print("Created ${sequences.routes.length} routes from $line lines.");
 
     return sequences;
   }
 
 }
+
+
 
 class BusRoute {
 
@@ -66,6 +99,12 @@ class BusRoute {
   int routeVariant = -1;
 
   List<RouteStop> busStops = [];
+
+  @override
+  String toString() {
+    // TODO: implement toString
+    return "Route: $routeNumber: ${busStops[0].stopName} - ${busStops.last.stopName} ";
+  }
 
 }
 
