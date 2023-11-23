@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:assets_audio_player/assets_audio_player.dart';
@@ -7,10 +8,13 @@ import 'package:ibus_tracker/Sequences.dart';
 import 'package:animated_custom_dropdown/custom_dropdown.dart';
 import 'package:glass/glass.dart';
 import 'package:intl/intl.dart';
+import 'package:text_scroll/text_scroll.dart';
+
+import 'IBusControlPanel.dart';
 
 Future<void> main() async {
   runApp(IBusTracker());
-  BusSequences sequences = BusSequences.fromCSV(await rootBundle.loadString("assets/bus-sequences.csv"));
+  IBus.instance;
 }
 
 class IBusTracker extends StatelessWidget {
@@ -20,7 +24,11 @@ class IBusTracker extends StatelessWidget {
     // TODO: implement build
     return MaterialApp(
 
-      home: HomePage()
+      home: HomePage(),
+
+      theme: ThemeData(
+        brightness: Brightness.dark
+      ),
 
     );
   }
@@ -30,22 +38,17 @@ class IBusTracker extends StatelessWidget {
 class HomePage extends StatefulWidget {
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<HomePage> createState() => HomePageState();
 
   late BusRoute? route = null;
-
-  bool isBusStopping = false;
-
 }
 
-class _HomePageState extends State<HomePage> {
-
+class HomePageState extends State<HomePage> {
 
   @override
   void initState() {
     // TODO: implement initState
     super.initState();
-
 
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeRight,
@@ -73,18 +76,17 @@ class _HomePageState extends State<HomePage> {
 
               onPressed: () async {
 
-                if (!widget.isBusStopping){
+                if (!IBus.instance.isBusStopping){
                   AssetsAudioPlayer.newPlayer().open(
-                      Audio("assets/audio/envirobell.mp3"),
-                      autoStart: true,
-                      showNotification: true,
-                      volume: 1000
+                    Audio("assets/audio/envirobell.mp3"),
+                    autoStart: true,
+                    showNotification: true
                   );
                 }
 
                 setState(() {
 
-                  widget.isBusStopping = !widget.isBusStopping;
+                  IBus.instance.isBusStopping = !IBus.instance.isBusStopping;
 
                 });
 
@@ -120,377 +122,113 @@ class _HomePageState extends State<HomePage> {
 
       drawer: Container(
 
-        width: 584,
+        width: 600,
 
         child: Drawer(
 
-          child: Container(
+          child: true ? Container(
 
-            child: true ? IBusPanel() : FutureBuilder(
+            margin: EdgeInsets.all(5),
 
-              future: rootBundle.loadString("assets/bus-sequences.csv"),
-              builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
+            alignment: Alignment.center,
 
-                if (snapshot.hasData){
+            child: Transform(
 
-                  BusSequences sequences = BusSequences.fromCSV(snapshot.data!);
+              alignment: Alignment.center,
 
-                  return CustomDropdown(
+              transform: Transform.scale(
+                scale: 0.9,
+              ).transform,
+              child: ControlPanel(),
 
-                    items: sequences.routes,
-                    hintText: "Select for a route",
+            ),
+
+          ) : Column(
+            children: [
+              Container(
+
+                child: FutureBuilder(
+
+                  future: rootBundle.loadString("assets/bus-sequences.csv"),
+                  builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
+
+                    if (snapshot.hasData){
+
+                      BusSequences sequences = BusSequences.fromCSV(snapshot.data!);
+
+                      return CustomDropdown(
+
+                        items: sequences.routes,
+                        hintText: "Select for a route",
 
 
-                    onChanged: (value) {
+                        onChanged: (value) {
 
-                      print("Set route to $value");
+                          print("Set route to $value");
 
-                      setState(() {
-                        widget.route = value;
-                      });
+                          setState(() {
+                            widget.route = value;
+                          });
 
-                    },
+                        },
 
-                  );
+                      );
 
-                } else {
-                  return const Text("Error 404");
-                }
+                    } else {
+                      return const Text("Error 404");
+                    }
 
-              },
+                  },
 
 
-            )
+                )
 
+              ),
+
+              ElevatedButton(
+
+                onPressed: () {
+
+                  Navigator.of(context).push(MaterialPageRoute(builder: (context) => ControlPanelTestApp()));
+
+                },
+
+                child: Text("Open Control Panel Tester")
+
+              )
+
+            ],
           ),
 
         ),
       ),
 
-      body: (widget.route == null) ? DotMatrix(
+      body: Container(
+        alignment: Alignment.center,
+        child: Container(
 
-        Top: "LEA INTERCHANGE",
-        Bottom: widget.isBusStopping ? "BUS STOPPING" : getShortTime(),
+          height: 150,
+          width: 900,
 
-      ) : DotMatrix(
+          padding: EdgeInsets.all(10),
 
-        Top: "${widget.route!.routeNumber} to ${beautifyString(widget.route!.busStops.last.stopName)}",
-        Bottom: /* Current Time HH:MM */ "${DateTime.now().hour}:${DateTime.now().minute}",
+          child: Transform(
+
+            transform: Transform.translate(
+              offset: Offset(0, 10)
+            ).transform,
+
+              child: DotMatrix()
+          ),
+          color: Colors.black,
+          alignment: Alignment.center,
+        ),
+
       ),
 
 
     );
   }
-}
-
-class IBusPanel extends StatelessWidget {
-
-    @override
-    Widget build(BuildContext context) {
-
-      return Container(
-
-        alignment: Alignment.center,
-
-        child: Container(
-
-          height: 400,
-
-
-          margin: const EdgeInsets.all(20),
-
-          // color: Colors.lightGreen.shade100,
-
-          decoration: BoxDecoration(
-            borderRadius: const BorderRadius.all(Radius.circular(10)),
-            color: Colors.lightGreen.shade100
-          ),
-
-          child: Row(
-
-            children: [
-
-              Container(
-
-                width: 241,
-
-                child: Column(
-
-                  children: [
-
-                    Container(
-
-                      padding: const EdgeInsets.all(10),
-
-                      width: double.infinity,
-
-                      child: Column(
-
-                        children: [
-
-                          const Padding(
-                            padding: EdgeInsets.only(
-                              top: 15,
-                              bottom: 10
-                            ),
-                            child: Text(
-                              "--:--",
-                              style: TextStyle(
-                                fontSize: 40,
-                                height: 1,
-                                fontFamily: "LCD"
-
-                              ),
-                            ),
-                          ),
-
-                          const Row(
-                            children: [
-                              Text(
-                                "234/123",
-
-                                textAlign: TextAlign.start,
-
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  height: 1,
-                                  fontFamily: "LCD"
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          Row(
-                            children: [
-                              Text(
-                                getLongTime(),
-
-                                textAlign: TextAlign.start,
-
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontFamily: "LCD"
-                                ),
-                              ),
-                            ],
-                          ),
-
-                        ],
-
-                      )
-
-                    ),
-
-
-
-                    Container(
-                      height: 3,
-                      color: Colors.black,
-                    ),
-
-                  ],
-
-                ),
-
-              ),
-
-              Container(
-                width: 3,
-                color: Colors.black,
-              ),
-
-              Column(
-
-                children: [
-
-                  Container(
-
-                    height: 40,
-                    width: 300,
-                    
-                    child: Container(
-
-                      decoration: const BoxDecoration(
-                        borderRadius: BorderRadius.only(
-                          topRight: Radius.circular(9),
-                        ),
-                        color: Colors.black,
-                      ),
-                      
-
-
-                      margin: EdgeInsets.all(3),
-
-                    ),
-
-                  ),
-
-                  Container(
-                    height: 3,
-                    width: 300,
-                    color: Colors.black,
-                  ),
-
-                  Container(
-
-                    padding: EdgeInsets.all(3),
-                    
-                    height: 70,
-                    width: 300,
-
-                    child: Container(
-
-                      color: Colors.black,
-
-                      padding: EdgeInsets.all(8),
-
-                      child: Text(
-                        "Walthamstow Bus Station",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontFamily: "LCD",
-                          color: Colors.lightGreen.shade100
-                        ),
-                      ),
-
-                    ),
-
-                  ),
-
-                  Container(
-                    height: 3,
-                    width: 300,
-                    color: Colors.black,
-                  ),
-
-                  Container(
-
-                    padding: EdgeInsets.all(3),
-
-                    height: 70,
-                    width: 300,
-
-                    child: Container(
-
-                      color: Colors.black,
-
-                      padding: EdgeInsets.all(8),
-
-                      child: Text(
-                        "Walthamstow Market",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontFamily: "LCD",
-                            color: Colors.lightGreen.shade100
-                        ),
-                      ),
-
-                    ),
-
-                  ),
-
-                  Container(
-                    height: 3,
-                    width: 300,
-                    color: Colors.black,
-                  ),
-
-                  Container(
-
-                    padding: EdgeInsets.all(3),
-
-                    height: 70,
-                    width: 300,
-
-                    child: Container(
-
-                      color: Colors.black,
-
-                      padding: EdgeInsets.all(8),
-
-                      child: Text(
-                        "Jewel Road",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontFamily: "LCD",
-                            color: Colors.lightGreen.shade100
-                        ),
-                      ),
-
-                    ),
-
-                  ),
-
-                  Container(
-                    height: 3,
-                    width: 300,
-                    color: Colors.black,
-                  ),
-
-                  Container(
-
-                    padding: EdgeInsets.all(3),
-
-                    height: 70,
-                    width: 300,
-
-                    child: Container(
-
-                      color: Colors.black,
-
-                      padding: EdgeInsets.all(8),
-
-                      child: Text(
-                        "Forest Road / Bell Corner",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontFamily: "LCD",
-                            color: Colors.lightGreen.shade100
-                        ),
-                      ),
-
-                    ),
-
-                  ),
-
-                  // Container(
-                  //
-                  //   color: Colors.black,
-                  //
-                  //   height: 80,
-                  //   width: 300,
-                  //
-                  //
-                  //
-                  //   child: Container(
-                  //
-                  //
-                  //
-                  //     child: Text(
-                  //       "NEW CROSS BUS GARAGE",
-                  //       style: TextStyle(
-                  //         fontSize: 20,
-                  //         fontFamily: "LCD",
-                  //         color: Colors.lightGreen.shade100
-                  //       ),
-                  //
-                  //     ),
-                  //   ),
-                  //
-                  // )
-
-                ],
-
-              )
-
-            ],
-
-          )
-
-        ).asGlass(),
-      );
-
-    }
 }
 
 const List<String> _phraseBlacklist = [
@@ -537,13 +275,11 @@ String beautifyString(String input) {
 
 class DotMatrix extends StatefulWidget {
 
-  late String Top;
 
-  late String Bottom;
 
   double fontSize = 60;
 
-  DotMatrix({this.Top = "Hello", this.Bottom = "World"});
+  DotMatrix();
 
   @override
   State<DotMatrix> createState() => _DotMatrixState();
@@ -551,11 +287,115 @@ class DotMatrix extends StatefulWidget {
 
 class _DotMatrixState extends State<DotMatrix> {
 
+  Color textColor = Colors.orange;
+
+  List<Shadow> textShadow = [
+    Shadow(
+      blurRadius: 7,
+      color: Colors.orange.withOpacity(0.5),
+      offset: Offset(0, 0)
+    )
+  ];
+
+  late Text bottom = Text(
+      getShortTime(),
+      style: const TextStyle(
+        fontFamily: "IBus",
+        fontSize: 60,
+        height: 1,
+        color: Colors.orange,
+      )
+  );
+
+  void refreshWidget(){
+
+    if (IBus.instance.isBusStopping){
+      setState(() {
+        bottom = Text(
+          "Bus Stopping",
+          style: TextStyle(
+            fontFamily: "IBus",
+            fontSize: 60,
+            height: 1,
+            color: textColor,
+            shadows: textShadow
+          )
+        );
+        print ("Bus Stopping");
+      });
+    } else {
+      setState(() {
+        bottom = Text(
+          getShortTime(),
+          style: TextStyle(
+            fontFamily: "IBus",
+            fontSize: 60,
+            height: 1,
+            color: textColor,
+            shadows: textShadow
+          )
+        );
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    // TODO: implement initState
+    super.initState();
+
+    IBus.instance.addRefresher(refreshWidget);
+
+    bottom = Text(
+      getShortTime(),
+      style: TextStyle(
+        fontFamily: "IBus",
+        fontSize: 60,
+        height: 1,
+        color: textColor,
+        shadows: textShadow
+      )
+    );
 
 
+    print("object");
+    Timer.periodic(Duration(seconds: 20), (timer) {
+      setState(() {
+        print("Refreshed time");
+
+        if (!IBus.instance.isBusStopping){
+          bottom = Text(
+            getShortTime(),
+            style: TextStyle(
+              fontFamily: "IBus",
+              fontSize: 60,
+              height: 1,
+              color: textColor,
+              shadows: textShadow
+            )
+          );
+        } else {
+          bottom = Text(
+            "Bus Stopping",
+            style: TextStyle(
+              fontFamily: "IBus",
+              fontSize: 60,
+              height: 1,
+              color: textColor,
+              shadows: textShadow
+            )
+          );
+          print ("Bus Stopping");
+        }
+
+
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+
 
 
     // TODO: implement build
@@ -563,41 +403,39 @@ class _DotMatrixState extends State<DotMatrix> {
 
       alignment: Alignment.center,
 
-      child: FittedBox(
+      child: Stack(
 
-        fit: BoxFit.fill,
+        children: [
 
-        child: Stack(
+          Column(
 
-          children: [
+            children: [
 
-            Column(
-
-              children: [
-
-                Text(
-                  widget.Top,
-                  style: TextStyle(
-                    fontFamily: "IBus",
-                    fontSize: widget.fontSize
-                  ),
+              TextScroll(
+                IBus.instance.CurrentMessage.length <= 40 ? "${IBus.instance.CurrentMessage}" : "${IBus.instance.CurrentMessage}                                                                           ",
+                style: TextStyle(
+                  fontFamily: "IBus",
+                  fontSize: widget.fontSize,
+                  height: 1,
+                  color: textColor,
+                  shadows: textShadow
                 ),
+                mode: TextScrollMode.endless,
+                velocity: Velocity(pixelsPerSecond: Offset(200, 0)),
+              ),
 
-                Text(
-                  widget.Bottom,
-                  style: TextStyle(
-                      fontFamily: "IBus",
-                      fontSize: widget.fontSize
-                  ),
-                )
+              SizedBox(
+                height: 2,
+              ),
 
-              ],
+              bottom
 
-            )
+            ],
 
-          ],
+          )
 
-        ),
+        ],
+
       )
 
     );
