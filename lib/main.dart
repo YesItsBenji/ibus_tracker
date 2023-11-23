@@ -11,6 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import 'IBusControlPanel.dart';
+import 'IBusDotMatrix.dart';
 
 Future<void> main() async {
   runApp(IBusTracker());
@@ -84,11 +85,7 @@ class HomePageState extends State<HomePage> {
                   );
                 }
 
-                setState(() {
-
-                  IBus.instance.isBusStopping = !IBus.instance.isBusStopping;
-
-                });
+                IBus.instance.isBusStopping = !IBus.instance.isBusStopping;
 
 
 
@@ -273,19 +270,19 @@ String beautifyString(String input) {
 }
 
 
-class DotMatrix extends StatefulWidget {
+class OldDotMatrix extends StatefulWidget {
 
 
 
   double fontSize = 60;
 
-  DotMatrix();
+  OldDotMatrix();
 
   @override
-  State<DotMatrix> createState() => _DotMatrixState();
+  State<OldDotMatrix> createState() => _DotMatrixState();
 }
 
-class _DotMatrixState extends State<DotMatrix> {
+class _DotMatrixState extends State<OldDotMatrix> {
 
   Color textColor = Colors.orange;
 

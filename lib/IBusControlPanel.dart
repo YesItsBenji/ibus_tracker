@@ -116,7 +116,7 @@ class IBus {
     }
   );
 
-  String CurrentMessage = "LEA INTERCHANGE";
+  String CurrentMessage = "WALTHAMSTOW AVENUE";
 
   void queueAnnouncement(IBusAnnouncementEntry announcementEntry){
 
@@ -129,6 +129,7 @@ class IBus {
   void addRefresher(Function() refreshFunction){
     _refreshFunctions.add(refreshFunction);
     print("Added refresh function");
+    refreshFunction();
   }
 
   void refresh(){
