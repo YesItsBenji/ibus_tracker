@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:assets_audio_player/assets_audio_player.dart';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ibus_tracker/Sequences.dart';
 import 'package:animated_custom_dropdown/custom_dropdown.dart';
 import 'package:glass/glass.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import 'IBusControlPanel.dart';
@@ -51,6 +53,9 @@ class HomePageState extends State<HomePage> {
     // TODO: implement initState
     super.initState();
 
+    Permission.storage.request();
+    Permission.camera.request();
+
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeRight,
       DeviceOrientation.landscapeLeft,
@@ -77,12 +82,37 @@ class HomePageState extends State<HomePage> {
 
               onPressed: () async {
 
+                await Permission.manageExternalStorage.request();
+
+                String pth = ("${IBus.instance.announcementDirectory}/${IBus.instance.nearestBusStop!.getAudioFileName()}");
+
+                print("Audio file: ${pth}");
+
+                Source audio = DeviceFileSource(pth);
+
+                IBus.instance.clearAudioQueue();
+
+                // IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+                //     message: "Next stop: ${IBus.instance.nearestBusStop!.stopName}",
+                //     audio: audio
+                // ));
+
+                AudioPlayer().play(audio);
+
+              },
+
+              child: const Icon(Icons.replay),
+
+            ),
+
+            FloatingActionButton(
+
+              onPressed: () async {
+
                 if (!IBus.instance.isBusStopping){
-                  AssetsAudioPlayer.newPlayer().open(
-                    Audio("assets/audio/envirobell.mp3"),
-                    autoStart: true,
-                    showNotification: true
-                  );
+
+                  AudioPlayer().play(AssetSource("assets/audio/envirobell.mp3"));
+
                 }
 
                 IBus.instance.isBusStopping = !IBus.instance.isBusStopping;
@@ -234,6 +264,14 @@ const List<String> _phraseBlacklist = [
 
 ];
 
+const Map<String, String> _phraseWhitelist = {
+
+  "ctr": "Centre",
+  "stn": "Station",
+  "tn": "Town",
+
+};
+
 String getShortTime(){
 
   // return the HH:MM with AM and PM and make sure that the hour is 12 hour format and it always double digits. IE 01, 02 etc
@@ -248,12 +286,52 @@ String getLongTime() {
   return formattedTime;
 }
 
+
+
 String beautifyString(String input) {
   // Remove special characters (<>, #) and split the input string into words
   List<String> words = input.replaceAll(RegExp('[<>#]'), '').split(' ');
 
+  // Replace whitelisted phrases, whether they match case or not
+  for (String phrase in _phraseWhitelist.keys) {
+    words = words.map((word) => word.replaceAll(RegExp(phrase, caseSensitive: false), _phraseWhitelist[phrase]!)).toList();
+  }
+
+  // Remove parentheses and their contents
+  words = words.map((word) => word.replaceAll(RegExp(r'\(.*\)'), '')).toList();
+
+  // Remove Square Brackets and their contents
+  words = words.map((word) => word.replaceAll(RegExp(r'\[.*\]'), '')).toList();
+
+  // Remove empty spaces
+  words = words.where((word) => word.isNotEmpty).toList();
+
+  // Capitalize the first letter of each word
+  words = words.map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase()).toList();
+
+  // Join the words into a single string
+  String beautifiedString = words.join(' ');
+
+  return beautifiedString;
+}
+
+String beautifyStringWithBlacklist(String input) {
+  // Remove special characters (<>, #) and split the input string into words
+  List<String> words = input.replaceAll(RegExp('[<>#]'), '').split(' ');
+
+  // Replace whitelisted phrases
+  for (String phrase in _phraseWhitelist.keys) {
+    words = words.map((word) => word.replaceAll(phrase, _phraseWhitelist[phrase]!)).toList();
+  }
+
   // Remove empty spaces
   words = words.where((word) => word.isNotEmpty && !word.contains('/')).toList();
+
+  // Remove parentheses and their contents
+  words = words.map((word) => word.replaceAll(RegExp(r'\(.*\)'), '')).toList();
+
+  // Remove Square Brackets and their contents
+  words = words.map((word) => word.replaceAll(RegExp(r'\[.*\]'), '')).toList();
 
   // Capitalize the first letter of each word
   words = words.map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase()).toList();

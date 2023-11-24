@@ -63,7 +63,7 @@ class DotMatrix extends StatelessWidget {
 
               });
 
-              print("Updated bottom line");
+              // print("Updated bottom line");
 
             },
 

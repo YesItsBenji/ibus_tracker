@@ -1,11 +1,17 @@
 
 import 'dart:async';
+import 'dart:io';
 
-import 'package:assets_audio_player/assets_audio_player.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:ibus_tracker/main.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Sequences.dart';
 
@@ -27,6 +33,7 @@ class _ControlPanelTestAppState extends State<ControlPanelTestApp> {
   void initState() {
     // TODO: implement initState
     super.initState();
+
 
 
     SystemChrome.setPreferredOrientations([
@@ -61,6 +68,57 @@ class _ControlPanelTestAppState extends State<ControlPanelTestApp> {
   }
 }
 
+Future<Position> _determinePosition() async {
+  bool serviceEnabled;
+  LocationPermission permission;
+
+  // Test if location services are enabled.
+  serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  if (!serviceEnabled) {
+    // Location services are not enabled don't continue
+    // accessing the position and request users of the
+    // App to enable the location services.
+    return Future.error('Location services are disabled.');
+  }
+
+  permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+    if (permission == LocationPermission.denied) {
+      // Permissions are denied, next time you could try
+      // requesting permissions again (this is also where
+      // Android's shouldShowRequestPermissionRationale
+      // returned true. According to Android guidelines
+      // your App should show an explanatory UI now.
+      return Future.error('Location permissions are denied');
+    }
+  }
+
+  if (permission == LocationPermission.deniedForever) {
+    // Permissions are denied forever, handle appropriately.
+    return Future.error(
+        'Location permissions are permanently denied, we cannot request permissions.');
+  }
+
+  // When we reach here, permissions are granted and we can
+  // continue accessing the position of the device.
+  return await Geolocator.getCurrentPosition();
+}
+
+class IBusLoginInformation {
+
+  BusGarage? busGarage = null;
+
+  BusRoute? busRoute = null;
+
+  int routeVariant = -1;
+
+  int operatingNumber = -1;
+
+  int tripNumber = -1;
+
+}
+
 // IBus singleton
 class IBus {
 
@@ -75,17 +133,123 @@ class IBus {
     return _instance!;
   }
 
-  IBus();
+  String announcementDirectory = "";
+
+  IBus(){
+
+    AudioCache.instance.prefix = "";
+
+
+
+    SharedPreferences.getInstance().then((pref) {
+
+      if (pref.containsKey("announcementDirectory")){
+        announcementDirectory = pref.getString("announcementDirectory")!;
+      } else {
+        FilePicker.platform.getDirectoryPath().then((value) {
+          announcementDirectory = value!;
+
+          pref.setString("announcementDirectory", announcementDirectory);
+        });
+      }
+
+
+    });
+
+
+    rootBundle.loadString("assets/garage_codes.csv").then((value) {
+      BusGarages.fromCSV(value);
+      refresh();
+    });
+
+
+    rootBundle.loadString("assets/bus-sequences.csv").then((value) {
+      BusSequences.fromCSV(value);
+      refresh();
+    });
+
+    rootBundle.loadString("assets/bus-stops.csv").then((value) async {
+      BusStops.fromCSV(value);
+
+      // get device location
+      Position devicePos = await _determinePosition();
+
+      BusStop? nearestStop = BusStops().getNearestBusStop(devicePos.latitude, devicePos.longitude);
+
+      if (nearestStop != nearestBusStop){
+        nearestBusStop = nearestStop;
+
+        CurrentMessage = beautifyString(nearestBusStop!.stopName);
+
+        refresh();
+      }
+
+      refresh();
+    });
+
+  }
 
   // Audio loop queue
   List<IBusAnnouncementEntry> _audioQueue = [];
   bool isPlayingAudio = false;
 
-  Timer announcementTimer() => Timer.periodic(
-    Duration(milliseconds: 10),
-      (Timer t) async {
+  void clearAudioQueue(){
+    _audioQueue.clear();
+  }
 
-      // print("Audio queue: ${_audioQueue.length}");
+  bool isNearestStopComputing = false;
+
+  Timer announcementTimer() => Timer.periodic(
+    Duration(milliseconds: 50),
+    (Timer t) async {
+
+
+      // print("Timer tick");
+      print("Audio queue length: ${_audioQueue.length}");
+
+      if (!isNearestStopComputing){
+        isNearestStopComputing = true;
+
+        // print("Computing nearest stop...");
+
+        Position devicePos = await _determinePosition();
+
+        BusStop? nearestStop = BusStops().getNearestBusStop(devicePos.latitude, devicePos.longitude);
+
+        if (nearestStop != null && (nearestStop != nearestBusStop || nearestBusStop == null)){
+          nearestBusStop = nearestStop;
+
+          CurrentMessage = beautifyString(nearestBusStop!.stopName);
+
+          print("Nearest stop: ${nearestBusStop!.stopName} updated!");
+
+
+          String pth = ("${announcementDirectory}/${nearestStop.getAudioFileName()}");
+
+          Source audio = DeviceFileSource(pth);
+
+          // check if file exists
+          if (!await File(pth).exists()){
+            audio = AssetSource("assets/audio/nextstopclosed.wav");
+          }
+
+
+
+          print("Audio file: ${pth}");
+
+          queueAnnouncement(IBusAnnouncementEntry(
+            message: beautifyString(nearestBusStop!.stopName),
+            audio: audio
+          ));
+
+          refresh();
+        }
+
+        // print("Done computing nearest stop");
+
+        isNearestStopComputing = false;
+      }
+
 
       if (_audioQueue.isNotEmpty && !isPlayingAudio){
         isPlayingAudio = true;
@@ -96,21 +260,38 @@ class IBus {
 
         refresh();
 
-        AssetsAudioPlayer player = AssetsAudioPlayer.newPlayer();
+        AudioPlayer player = AudioPlayer();
 
-        player.open(
-            _audioQueue[0].audio!,
-          autoStart: true,
-          showNotification: false,
-          loopMode: LoopMode.single
+        IBusAnnouncementEntry entry = _audioQueue[0];
+
+        player.play(
+            entry.audio!,
         );
 
-        player.playlistAudioFinished.listen((event) {
+        player.onPlayerComplete.listen((event) {
+          // player.stop();
+
+          // If there is nothing else in the queue to play, then leave the announcement on the screen for 5 seconds and then change it back to the bus stop name.
+          // If there is something else in the queue, then play the next announcement immediately.
+          if (_audioQueue.length == 1){
+
+            int QueueLength = _audioQueue.length;
+
+            Future.delayed(Duration(seconds: 2), () {
+              if (QueueLength == 1){
+                CurrentMessage = beautifyString(nearestBusStop!.stopName);
+                refresh();
+              }
+            });
+          }
+
           _audioQueue.removeAt(0);
           isPlayingAudio = false;
           print("Popped audio queue");
-          player.stop();
         });
+
+
+
       }
 
     }
@@ -148,6 +329,9 @@ class IBus {
 
   bool get isBusStopping => _isBusStopping;
 
+  IBusLoginInformation? loginInformation;
+
+  BusStop? nearestBusStop;
 
 }
 
@@ -155,7 +339,7 @@ class IBusAnnouncementEntry {
 
   final String message;
 
-  final Audio? audio;
+  final Source? audio;
 
   IBusAnnouncementEntry({
     this.message = "*** NO MESSAGE ***",
@@ -177,6 +361,9 @@ class ControlPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     // TODO: implement build
     return Container(
+
+      height: 384,
+
       padding: EdgeInsets.all(2),
 
       color: Colors.black,
@@ -300,13 +487,15 @@ class ControlPanel extends StatelessWidget {
           
           
               Container(
+
+                alignment: Alignment.topCenter,
           
                 width: 300,
           
                 child: Column(
           
                   mainAxisSize: MainAxisSize.min,
-          
+
           
                   children: [
           
@@ -329,8 +518,9 @@ class ControlPanel extends StatelessWidget {
                       height: 2,
           
                     ),
-          
-                    _staticAnnouncer(),
+
+
+                    IBus.instance.loginInformation == null ? ControlPanelLogin() : _staticAnnouncer(),
 
 
           
@@ -348,6 +538,21 @@ class ControlPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+class ControlPanelLogin extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    // TODO: implement build
+    return Container(
+
+
+
+    );
+  }
+
+
+
 }
 
 class _staticAnnouncer extends StatefulWidget {
@@ -379,7 +584,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
               message: "Driver Change",
-              audio: Audio("assets/audio/driverchange.mp3")
+              audio: AssetSource("assets/audio/driverchange.mp3")
             ));
 
           },
@@ -400,7 +605,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "No standing on upper deck",
-                audio: Audio("assets/audio/nostanding.mp3")
+                audio: AssetSource("assets/audio/nostanding.mp3")
             ));
 
           },
@@ -421,7 +626,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Please wear a face covering!",
-                audio: Audio("assets/audio/facecovering.mp3")
+                audio: AssetSource("assets/audio/facecovering.mp3")
             ));
 
           },
@@ -442,7 +647,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Seats are available upstairs",
-                audio: Audio("assets/audio/seatsupstairs.mp3")
+                audio: AssetSource("assets/audio/seatsupstairs.mp3")
             ));
           },
         ),
@@ -462,7 +667,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Bus terminates here. Please take your belongings with you",
-                audio: Audio("assets/audio/busterminateshere.mp3")
+                audio: AssetSource("assets/audio/busterminateshere.mp3")
             ));
           },
         ),
@@ -482,7 +687,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Bus on diversion. Please listen for further announcements",
-                audio: Audio("assets/audio/busondiversion.mp3")
+                audio: AssetSource("assets/audio/busondiversion.mp3")
             ));
 
           },
@@ -503,7 +708,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Destination Changed - please listen for further instructions",
-                audio: Audio("assets/audio/destinationchange.mp3")
+                audio: AssetSource("assets/audio/destinationchange.mp3")
             ));
           },
         ),
@@ -523,7 +728,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Wheelchair space requested",
-                audio: Audio("assets/audio/wheelchairspace1.mp3")
+                audio: AssetSource("assets/audio/wheelchairspace1.mp3")
             ));
           },
         ),
@@ -543,7 +748,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Please move down the bus",
-                audio: Audio("assets/audio/movedownthebus.mp3")
+                audio: AssetSource("assets/audio/movedownthebus.mp3")
             ));
           },
         ),
@@ -563,7 +768,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "The next bus stop is closed",
-                audio: Audio("assets/audio/nextstopclosed.wav")
+                audio: AssetSource("assets/audio/nextstopclosed.wav")
             ));
           },
         ),
@@ -583,7 +788,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "CCTV is in operation on this bus",
-                audio: Audio("assets/audio/cctvoperation.mp3")
+                audio: AssetSource("assets/audio/cctvoperation.mp3")
             ));
           },
         ),
@@ -603,7 +808,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Driver will open the doors when it is safe to do so",
-                audio: Audio("assets/audio/safedooropening.mp3")
+                audio: AssetSource("assets/audio/safedooropening.mp3")
             ));
           },
         ),
@@ -623,7 +828,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "For your child's safety, please remain with your buggy",
-                audio: Audio("assets/audio/buggysafety.mp3")
+                audio: AssetSource("assets/audio/buggysafety.mp3")
             ));
           },
         ),
@@ -643,7 +848,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Wheelchair priority space required",
-                audio: Audio("assets/audio/wheelchairspace2.mp3")
+                audio: AssetSource("assets/audio/wheelchairspace2.mp3")
             ));
           },
         ),
@@ -663,7 +868,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "Regulating service - please listen for further information",
-                audio: Audio("assets/audio/serviceregulation.mp3")
+                audio: AssetSource("assets/audio/serviceregulation.mp3")
             ));
           },
         ),
@@ -683,7 +888,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           onPressed: () {
             IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
                 message: "This bus is ready to depart",
-                audio: Audio("assets/audio/readytodepart.mp3")
+                audio: AssetSource("assets/audio/readytodepart.mp3")
             ));
           },
         ),
