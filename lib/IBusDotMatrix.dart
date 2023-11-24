@@ -24,7 +24,7 @@ class DotMatrix extends StatelessWidget {
             dotMatrix: this,
 
             onBegin: (state){
-              IBus.instance.addRefresher(() {
+              IBus.instance.addRefresher(this, () {
 
                 if (state.widget.message != IBus.instance.CurrentMessage){
                   state.setState(() {

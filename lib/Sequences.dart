@@ -1,7 +1,4 @@
 
-
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:csv/csv.dart';
 import 'package:ibus_tracker/main.dart';
@@ -99,6 +96,19 @@ class BusSequences {
     return sequences;
   }
 
+  List<BusRoute>? getBusRoute(String routeNumber) {
+
+    List<BusRoute> routes = [];
+
+    for (BusRoute route in this.routes) {
+      if (route.routeNumber == routeNumber) {
+        routes.add(route);
+      }
+    }
+
+    return routes;
+  }
+
 }
 
 
@@ -111,10 +121,37 @@ class BusRoute {
 
   List<RouteStop> busStops = [];
 
+  RouteStop getNearestBusStop(double latitude, double longitude) {
+
+    RouteStop nearestBusStop = busStops.first;
+
+    double nearestDistance = _calculateDistance(latitude, longitude, nearestBusStop.latitude, nearestBusStop.longitude);
+
+    for (RouteStop busStop in busStops) {
+
+      double distance = _calculateDistance(latitude, longitude, busStop.latitude, busStop.longitude);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestBusStop = busStop;
+      }
+
+    }
+
+    return nearestBusStop;
+
+  }
+
   @override
   String toString() {
     // TODO: implement toString
     return "Route: $routeNumber: ${busStops[0].stopName} - ${busStops.last.stopName} ";
+  }
+
+  String getAudioFileName() {
+
+    return "R_${routeNumber}_001.mp3";
+
   }
 
 }
@@ -127,6 +164,29 @@ class RouteStop {
 
   double latitude = 0.0;
   double longitude = 0.0;
+
+  String getAudioFileName() {
+
+    // Convert the stop name to all caps
+    String stopName = this.stopName.toUpperCase();
+
+    stopName = beautifyString(stopName);
+
+    stopName = stopName.replaceAll('/', '');
+
+    stopName = stopName.replaceAll('\'', '');
+
+    stopName = stopName.replaceAll('  ', ' ');
+
+    // Replace space with underscore
+    stopName = stopName.replaceAll(' ', '_');
+
+    // convert to all caps
+    stopName = stopName.toUpperCase();
+
+    return "S_${stopName}_001.mp3";
+
+  }
 
 }
 
@@ -163,7 +223,7 @@ class BusStops {
         busStop.stopCode = entries[1].toInt();
       } catch (e) {
         busStop.stopCode = -2;
-        print(e);
+        // print(e);
       }
 
       double northing = entries[5].toDouble();
@@ -301,6 +361,17 @@ class BusGarages {
 
     return busGarages;
 
+  }
+
+  BusGarage? getBusGarage(int garageNumber) {
+
+    for (BusGarage busGarage in busGarages) {
+      if (busGarage.garageNumber == garageNumber) {
+        return busGarage;
+      }
+    }
+
+    return null;
   }
 
 }

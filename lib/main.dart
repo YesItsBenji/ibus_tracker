@@ -1,16 +1,13 @@
 import 'dart:async';
-import 'dart:io';
-
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ibus_tracker/Sequences.dart';
 import 'package:animated_custom_dropdown/custom_dropdown.dart';
-import 'package:glass/glass.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:text_scroll/text_scroll.dart';
 
 import 'IBusControlPanel.dart';
 import 'IBusDotMatrix.dart';
@@ -78,7 +75,7 @@ class HomePageState extends State<HomePage> {
 
           children: [
 
-            FloatingActionButton(
+            kDebugMode ? FloatingActionButton(
 
               onPressed: () async {
 
@@ -103,7 +100,7 @@ class HomePageState extends State<HomePage> {
 
               child: const Icon(Icons.replay),
 
-            ),
+            ) : Container(),
 
             FloatingActionButton(
 
@@ -113,9 +110,15 @@ class HomePageState extends State<HomePage> {
 
                   AudioPlayer().play(AssetSource("assets/audio/envirobell.mp3"));
 
+                  Future.delayed(Duration(seconds: 3), () {
+                    IBus.instance.announceDestination();
+                    IBus.instance.isBusStopping = false;
+                  });
+
                 }
 
                 IBus.instance.isBusStopping = !IBus.instance.isBusStopping;
+
 
 
 
@@ -345,174 +348,4 @@ String beautifyStringWithBlacklist(String input) {
   }
 
   return beautifiedString;
-}
-
-
-class OldDotMatrix extends StatefulWidget {
-
-
-
-  double fontSize = 60;
-
-  OldDotMatrix();
-
-  @override
-  State<OldDotMatrix> createState() => _DotMatrixState();
-}
-
-class _DotMatrixState extends State<OldDotMatrix> {
-
-  Color textColor = Colors.orange;
-
-  List<Shadow> textShadow = [
-    Shadow(
-      blurRadius: 7,
-      color: Colors.orange.withOpacity(0.5),
-      offset: Offset(0, 0)
-    )
-  ];
-
-  late Text bottom = Text(
-      getShortTime(),
-      style: const TextStyle(
-        fontFamily: "IBus",
-        fontSize: 60,
-        height: 1,
-        color: Colors.orange,
-      )
-  );
-
-  void refreshWidget(){
-
-    if (IBus.instance.isBusStopping){
-      setState(() {
-        bottom = Text(
-          "Bus Stopping",
-          style: TextStyle(
-            fontFamily: "IBus",
-            fontSize: 60,
-            height: 1,
-            color: textColor,
-            shadows: textShadow
-          )
-        );
-        print ("Bus Stopping");
-      });
-    } else {
-      setState(() {
-        bottom = Text(
-          getShortTime(),
-          style: TextStyle(
-            fontFamily: "IBus",
-            fontSize: 60,
-            height: 1,
-            color: textColor,
-            shadows: textShadow
-          )
-        );
-      });
-    }
-  }
-
-  @override
-  void initState() {
-    // TODO: implement initState
-    super.initState();
-
-    IBus.instance.addRefresher(refreshWidget);
-
-    bottom = Text(
-      getShortTime(),
-      style: TextStyle(
-        fontFamily: "IBus",
-        fontSize: 60,
-        height: 1,
-        color: textColor,
-        shadows: textShadow
-      )
-    );
-
-
-    print("object");
-    Timer.periodic(Duration(seconds: 20), (timer) {
-      setState(() {
-        print("Refreshed time");
-
-        if (!IBus.instance.isBusStopping){
-          bottom = Text(
-            getShortTime(),
-            style: TextStyle(
-              fontFamily: "IBus",
-              fontSize: 60,
-              height: 1,
-              color: textColor,
-              shadows: textShadow
-            )
-          );
-        } else {
-          bottom = Text(
-            "Bus Stopping",
-            style: TextStyle(
-              fontFamily: "IBus",
-              fontSize: 60,
-              height: 1,
-              color: textColor,
-              shadows: textShadow
-            )
-          );
-          print ("Bus Stopping");
-        }
-
-
-      });
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-
-
-
-    // TODO: implement build
-    return Container(
-
-      alignment: Alignment.center,
-
-      child: Stack(
-
-        children: [
-
-          Column(
-
-            children: [
-
-              TextScroll(
-                IBus.instance.CurrentMessage.length <= 40 ? "${IBus.instance.CurrentMessage}" : "${IBus.instance.CurrentMessage}                                                                           ",
-                style: TextStyle(
-                  fontFamily: "IBus",
-                  fontSize: widget.fontSize,
-                  height: 1,
-                  color: textColor,
-                  shadows: textShadow
-                ),
-                mode: TextScrollMode.endless,
-                velocity: Velocity(pixelsPerSecond: Offset(200, 0)),
-              ),
-
-              SizedBox(
-                height: 2,
-              ),
-
-              bottom
-
-            ],
-
-          )
-
-        ],
-
-      )
-
-    );
-  }
 }

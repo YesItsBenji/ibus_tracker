@@ -72,6 +72,7 @@ flutter:
   assets:
     - assets/bus-sequences.csv
     - assets/bus-stops.csv
+    - assets/garage_codes.csv
     - assets/audio/envirobell.mp3
     - assets/audio/nostanding.mp3
     - assets/audio/
