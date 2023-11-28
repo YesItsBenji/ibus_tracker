@@ -12,7 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:ibus_tracker/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'Sequences.dart';
+import 'bus_datasets.dart';
 
 Future<void> main() async {
   runApp(ControlPanelTestApp());
@@ -144,6 +144,7 @@ class IBus {
     if (_instance == null){
       _instance = IBus();
       _instance?.announcementTimer();
+      _instance?.locationTimer();
     }
 
     return _instance!;
@@ -178,7 +179,6 @@ class IBus {
       refresh();
     });
 
-
     rootBundle.loadString("assets/bus-sequences.csv").then((value) {
       BusSequences.fromCSV(value);
       refresh();
@@ -186,6 +186,10 @@ class IBus {
 
     rootBundle.loadString("assets/bus-stops.csv").then((value) async {
       BusStops.fromCSV(value);
+    });
+
+    rootBundle.loadString("assets/bus-blinds.csv").then((value) {
+      BusBlinds.fromCSV(value);
     });
 
   }
@@ -206,119 +210,134 @@ class IBus {
 
 
       // print("Timer tick");
-      print("Audio queue length: ${_audioQueue.length}");
-
-      if (!isNearestStopComputing){
-        isNearestStopComputing = true;
-
-        // print("Computing nearest stop...");
-
-        Position devicePos = await _determinePosition();
-
-        RouteStop? nearestStop = loginInformation?.getBusRoute()?.getNearestBusStop(devicePos.latitude, devicePos.longitude);
-
-        if (nearestStop != null && (nearestStop != nearestBusStop || nearestBusStop == null)){
-          nearestBusStop = nearestStop;
-
-          print("Nearest stop: ${nearestBusStop!.stopName} updated!");
-
-
-          String pth = ("${announcementDirectory}/${nearestStop.getAudioFileName()}");
-
-          Source audio = DeviceFileSource(pth);
-
-          // check if file exists
-          if (!await File(pth).exists()){
-            audio = AssetSource("assets/audio/nextstopclosed.wav");
-          }
+      // print("Audio queue length: ${_audioQueue.length}");
 
 
 
-          print("Audio file: ${pth}");
 
-          queueAnnouncement(IBusAnnouncementEntry(
-            message: beautifyString(nearestBusStop!.stopName),
-            audio: [audio],
-            persist: true
-          ));
+      try {
+        if (_audioQueue.isNotEmpty && !isPlayingAudio){
+          isPlayingAudio = true;
+
+          print("Playing: ${_audioQueue[0].message}");
+
+          CurrentMessage = _audioQueue[0].message;
 
           refresh();
-        }
 
-        // print("Done computing nearest stop");
+          AudioPlayer player = AudioPlayer();
 
-        isNearestStopComputing = false;
-      }
+          IBusAnnouncementEntry entry = _audioQueue[0];
 
-
-      if (_audioQueue.isNotEmpty && !isPlayingAudio){
-        isPlayingAudio = true;
-
-        print("Playing: ${_audioQueue[0].message}");
-
-        CurrentMessage = _audioQueue[0].message;
-
-        refresh();
-
-        AudioPlayer player = AudioPlayer();
-
-        IBusAnnouncementEntry entry = _audioQueue[0];
-
-        if (entry.delay != null){
-          await Future.delayed(entry.delay!);
-        }
+          if (entry.delay != null){
+            await Future.delayed(entry.delay!);
+          }
 
 
-        for (Source audio in entry.audio){
-          try {
-            await player.play(audio);
-            Duration? duration = await player.getDuration();
+          for (Source audio in entry.audio){
+            try {
+              await player.play(audio);
+              Duration? duration = await player.getDuration();
 
-            // wait for the audio to finish playing
-            await Future.delayed(duration! + const Duration(milliseconds: 500));
-          } catch (e) {
-            print(e);
+              // wait for the audio to finish playing
+              if (entry.audio.last != audio) {
+                await Future.delayed(duration! + const Duration(milliseconds: 350));
+              }
+            } catch (e) {
+              print(e);
+              _audioQueue.removeAt(0);
+              isPlayingAudio = false;
+
+
+
+              refresh();
+              break;
+            }
+
+          }
+
+
+          player.onPlayerComplete.listen((event) {
+            // player.stop();
+
+            // If there is nothing else in the queue to play, then leave the announcement on the screen for 5 seconds and then change it back to the bus stop name.
+            // If there is something else in the queue, then play the next announcement immediately.
+            if (_audioQueue.length == 1){
+
+              int QueueLength = _audioQueue.length;
+
+              Future.delayed(const Duration(seconds: 2), () {
+                if (QueueLength == 1){
+
+                  if (!entry.persist){
+
+                    announceDestination();
+
+                  }
+
+                  refresh();
+                }
+              });
+            }
+
             _audioQueue.removeAt(0);
             isPlayingAudio = false;
-            refresh();
-            break;
-          }
+            print("Popped audio queue");
+          });
+
+
 
         }
-
-
-        player.onPlayerComplete.listen((event) {
-          // player.stop();
-
-          // If there is nothing else in the queue to play, then leave the announcement on the screen for 5 seconds and then change it back to the bus stop name.
-          // If there is something else in the queue, then play the next announcement immediately.
-          if (_audioQueue.length == 1){
-
-            int QueueLength = _audioQueue.length;
-
-            Future.delayed(const Duration(seconds: 2), () {
-              if (QueueLength == 1){
-
-                if (!entry.persist){
-                  CurrentMessage = beautifyString(loginInformation!.getBusRoute()!.routeNumber) + " to " + beautifyString(loginInformation!.getBusRoute()!.busStops.last.stopName);
-                }
-
-                refresh();
-              }
-            });
-          }
-
-          _audioQueue.removeAt(0);
-          isPlayingAudio = false;
-          print("Popped audio queue");
-        });
-
-
-
+      } catch (e) {
+        isPlayingAudio = false;
+        _audioQueue.removeAt(0);
       }
 
     }
   );
+
+  Timer locationTimer() => Timer.periodic(Duration(milliseconds: 50), (timer) async {
+    if (true){
+      isNearestStopComputing = true;
+
+      // print("Computing nearest stop...");
+
+      Position devicePos = await _determinePosition();
+
+      RouteStop? nearestStop = loginInformation?.getBusRoute()?.getNextBusStop(devicePos.latitude, devicePos.longitude);
+
+      if (nearestStop != null && (nearestStop != nearestBusStop || nearestBusStop == null)){
+        nearestBusStop = nearestStop;
+
+        print("Nearest stop: ${nearestBusStop!.stopName} updated!");
+
+
+        String pth = ("${announcementDirectory}/${nearestStop.getAudioFileName()}");
+
+        Source audio = DeviceFileSource(pth);
+
+        // check if file exists
+        if (!await File(pth).exists()){
+          audio = AssetSource("assets/audio/nextstopclosed.wav");
+        }
+
+
+
+        print("Audio file: ${pth}");
+
+        queueAnnouncement(IBusAnnouncementEntry(
+          message: beautifyString(nearestBusStop!.stopName),
+          audio: [audio],
+          persist: true
+        ));
+        refresh();
+      }
+
+      // print("Done computing nearest stop");
+
+      isNearestStopComputing = false;
+    }
+  });
 
   String CurrentMessage = "*** NO MESSAGE ***";
 
@@ -328,25 +347,41 @@ class IBus {
 
   }
 
-  void announceDestination(){
+  void announceDestination({bool withAudio = false}){
 
     // {RouteNumber} to {Destination}
 
     AssetSource audio = AssetSource("assets/audio/to_destination.wav");
 
+    RouteStop lastStop = loginInformation!.getBusRoute()!.busStops.last;
+
+    BusBlindsEntry? destinationBlind = BusBlinds().getNearestBusBlind(lastStop.latitude, lastStop.longitude, loginInformation!.getBusRoute()!.routeNumber);
+
+    print("Destination file name: ${destinationBlind!.getAudioFileName()}");
+
     // get the destination audio file
-    String Destinationpth = ("${announcementDirectory}/${loginInformation!.getBusRoute()!.busStops.last.getAudioFileName()}");
+
+    print(destinationBlind!.getAudioFileName());
+
+    String Destinationpth = ("${announcementDirectory}/${destinationBlind!.getAudioFileName()}");
     DeviceFileSource audioDestination = DeviceFileSource(Destinationpth);
 
     // get the number audio file
     String numberPath = ("${announcementDirectory}/${loginInformation!.getBusRoute()!.getAudioFileName()}");
     DeviceFileSource audioNumber = DeviceFileSource(numberPath);
 
-    // queue the announcement
-    queueAnnouncement(IBusAnnouncementEntry(
-      message: beautifyString(loginInformation!.getBusRoute()!.routeNumber) + " to " + beautifyString(loginInformation!.getBusRoute()!.busStops.last.stopName),
-      audio: [audioNumber, audio, audioDestination]
-    ));
+    String message = beautifyString(loginInformation!.getBusRoute()!.routeNumber) + " to " + destinationBlind.label;
+
+    if (withAudio){
+      queueAnnouncement(IBusAnnouncementEntry(
+          message: message,
+          audio: [audioNumber, audio, audioDestination]
+      ));
+    } else {
+     CurrentMessage = message;
+     refresh();
+    }
+
 
 
   }
@@ -724,7 +759,7 @@ class ControlPanelLogin extends StatelessWidget {
                     IBus.instance.loginInformation!.operatingNumber = int.parse(operatingNumberController.text);
                     IBus.instance.loginInformation!.tripNumber = int.parse(tripNumberController.text);
 
-                    IBus.instance.CurrentMessage = IBus.instance.loginInformation!.busGarage!.garageName;
+                    IBus.instance.CurrentMessage = IBus.instance.loginInformation!.busGarage!.garageName ?? "";
 
                     IBus.instance.refresh();
                   },
@@ -1177,9 +1212,11 @@ class ControlPanelRouteVarient extends StatelessWidget {
 
           // {RouteNumber} to {Destination}
 
-          IBus.instance.CurrentMessage = beautifyString(IBus.instance.loginInformation!.getBusRoute()!.routeNumber) + " to " + beautifyString(IBus.instance.loginInformation!.getBusRoute()!.busStops.last.stopName);
 
-          IBus.instance.refresh();
+
+          IBus.instance.announceDestination();
+
+          print("Log in completed.");
         },
       ));
     }

@@ -4,7 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:ibus_tracker/Sequences.dart';
+import 'package:ibus_tracker/bus_datasets.dart';
 import 'package:animated_custom_dropdown/custom_dropdown.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -75,32 +75,41 @@ class HomePageState extends State<HomePage> {
 
           children: [
 
-            kDebugMode ? FloatingActionButton(
+            FloatingActionButton(
 
               onPressed: () async {
 
                 await Permission.manageExternalStorage.request();
 
-                String pth = ("${IBus.instance.announcementDirectory}/${IBus.instance.nearestBusStop!.getAudioFileName()}");
-
-                print("Audio file: ${pth}");
-
-                Source audio = DeviceFileSource(pth);
-
                 IBus.instance.clearAudioQueue();
+                IBus.instance.isPlayingAudio = false;
 
-                // IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
-                //     message: "Next stop: ${IBus.instance.nearestBusStop!.stopName}",
-                //     audio: audio
-                // ));
+                if (kDebugMode){
 
-                AudioPlayer().play(audio);
+                  String pth = ("${IBus.instance.announcementDirectory}/${IBus.instance.nearestBusStop!.getAudioFileName()}");
+
+                  Source audio = DeviceFileSource(pth);
+
+                  // IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+                  //     message: "Next stop: ${IBus.instance.nearestBusStop!.stopName}",
+                  //     audio: [audio]
+                  // ));
+
+                }
+
+
+
+
 
               },
 
-              child: const Icon(Icons.replay),
+              child: const Icon(Icons.bug_report),
 
-            ) : Container(),
+            ),
+
+            const SizedBox(
+                width: 10
+            ),
 
             FloatingActionButton(
 
@@ -111,7 +120,7 @@ class HomePageState extends State<HomePage> {
                   AudioPlayer().play(AssetSource("assets/audio/envirobell.mp3"));
 
                   Future.delayed(Duration(seconds: 3), () {
-                    IBus.instance.announceDestination();
+                    IBus.instance.announceDestination(withAudio: true);
                     IBus.instance.isBusStopping = false;
                   });
 
@@ -124,7 +133,7 @@ class HomePageState extends State<HomePage> {
 
               },
 
-              child: const Icon(Icons.stop_sharp),
+              child: const Icon(Icons.notifications_active),
 
             ),
 
@@ -308,6 +317,9 @@ String beautifyString(String input) {
 
   // Remove empty spaces
   words = words.where((word) => word.isNotEmpty).toList();
+
+  // Remove lol
+  words = words.where((word) => word != 'Lol').toList();
 
   // Capitalize the first letter of each word
   words = words.map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase()).toList();

@@ -41,6 +41,8 @@ dependencies:
   file_picker: ^6.1.1
   shared_preferences: ^2.2.2
   permission_handler: ^11.1.0
+  vector_math: ^2.1.4
+#  flutter_tts: ^3.8.4
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -49,6 +51,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -73,6 +76,7 @@ flutter:
     - assets/bus-sequences.csv
     - assets/bus-stops.csv
     - assets/garage_codes.csv
+    - assets/bus-blinds.csv
     - assets/audio/envirobell.mp3
     - assets/audio/nostanding.mp3
     - assets/audio/
