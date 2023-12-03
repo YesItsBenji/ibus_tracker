@@ -28,8 +28,6 @@ class OSGrid {
     final point = proj4.Point(x: longitude, y: latitude);
     final transformedPoint = sourceProjection.transform(destinationProjection, point);
 
-    print("transformedPoint: ${transformedPoint.x}, ${transformedPoint.y}");
-
     return Vector2(transformedPoint.x, transformedPoint.y);
   }
 

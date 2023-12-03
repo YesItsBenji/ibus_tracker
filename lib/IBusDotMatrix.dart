@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:ibus_tracker/IBusControlPanel.dart';
+import 'package:ibus_tracker/bus_datasets.dart';
 import 'package:ibus_tracker/main.dart';
 import 'package:text_scroll/text_scroll.dart';
 
@@ -24,11 +25,11 @@ class DotMatrix extends StatelessWidget {
             dotMatrix: this,
 
             onBegin: (state){
-              IBus.instance.addRefresher(this, () {
+              IBus().addRefresher(this, () {
 
-                if (state.widget.message != IBus.instance.CurrentMessage){
+                if (state.widget.message != IBus().CurrentMessage){
                   state.setState(() {
-                    state.widget.message = IBus.instance.CurrentMessage;
+                    state.widget.message = IBus().CurrentMessage;
                   });
                 }
 
@@ -55,10 +56,10 @@ class DotMatrix extends StatelessWidget {
 
               state.setState(() {
 
-                if (IBus.instance.isBusStopping){
+                if (IBus().isBusStopping){
                   state.widget.message = "Bus Stopping";
                 } else {
-                  state.widget.message = getShortTime();
+                  state.widget.message = NameBeutify.getShortTime();
                 }
 
               });

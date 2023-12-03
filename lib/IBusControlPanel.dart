@@ -8,8 +8,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:ibus_tracker/main.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'bus_datasets.dart';
@@ -138,29 +140,38 @@ class IBusLoginInformation {
 // IBus singleton
 class IBus {
 
-  static IBus? _instance;
+  // singleton with initialisation
+  static final IBus _instance = IBus._internal();
 
-  static IBus get instance {
-    if (_instance == null){
-      _instance = IBus();
-      _instance?.announcementTimer();
-      _instance?.locationTimer();
-    }
-
-    return _instance!;
+  factory IBus() {
+    return _instance;
   }
+
+  IBus._internal(){
+    init();
+  }
+
 
   String announcementDirectory = "";
 
-  IBus(){
+  void init(){
+
+    announcementTimer();
 
     AudioCache.instance.prefix = "";
 
+    prefCallback(SharedPreferences pref) {
+      print("Inside shared preferences");
 
+      bool conditionA = pref.containsKey("announcementDirectory");
+      bool conditionB = false;
+      bool conditionC = false;
+      if (conditionA){
+        conditionB = Directory(pref.getString("announcementDirectory")!).existsSync();
+        conditionC = pref.getString("announcementDirectory")!.isNotEmpty;
+      }
 
-    SharedPreferences.getInstance().then((pref) {
-
-      if (pref.containsKey("announcementDirectory")){
+      if (conditionA && conditionB && conditionC){
         announcementDirectory = pref.getString("announcementDirectory")!;
       } else {
         FilePicker.platform.getDirectoryPath().then((value) {
@@ -169,9 +180,22 @@ class IBus {
           pref.setString("announcementDirectory", announcementDirectory);
         });
       }
+    }
+
+    // Check if platform android
+    if (Platform.isAndroid){
+      Permission.manageExternalStorage.request().then((value) => {
+
+        print("Storage Permission: $value"),
+
+        SharedPreferences.getInstance().then(prefCallback)
+      });
+    } else {
+      SharedPreferences.getInstance().then(prefCallback);
+    }
 
 
-    });
+
 
 
     rootBundle.loadString("assets/garage_codes.csv").then((value) {
@@ -180,7 +204,7 @@ class IBus {
     });
 
     rootBundle.loadString("assets/bus-sequences.csv").then((value) {
-      BusSequences.fromCSV(value);
+      BusSequences sequences = BusSequences.fromCSV(value);
       refresh();
     });
 
@@ -192,6 +216,9 @@ class IBus {
       BusBlinds.fromCSV(value);
     });
 
+    rootBundle.loadString("assets/rail-replacement.csv").then((value) {
+      RailReplacement.fromCSV(value);
+    });
   }
 
   // Audio loop queue
@@ -209,17 +236,10 @@ class IBus {
     (Timer t) async {
 
 
-      // print("Timer tick");
-      // print("Audio queue length: ${_audioQueue.length}");
-
-
-
-
       try {
         if (_audioQueue.isNotEmpty && !isPlayingAudio){
           isPlayingAudio = true;
 
-          print("Playing: ${_audioQueue[0].message}");
 
           CurrentMessage = _audioQueue[0].message;
 
@@ -244,11 +264,8 @@ class IBus {
                 await Future.delayed(duration! + const Duration(milliseconds: 350));
               }
             } catch (e) {
-              print(e);
               _audioQueue.removeAt(0);
               isPlayingAudio = false;
-
-
 
               refresh();
               break;
@@ -271,7 +288,9 @@ class IBus {
 
                   if (!entry.persist){
 
-                    announceDestination();
+                    if (CurrentMessage == entry.message){
+                      announceDestination();
+                    }
 
                   }
 
@@ -282,13 +301,14 @@ class IBus {
 
             _audioQueue.removeAt(0);
             isPlayingAudio = false;
-            print("Popped audio queue");
+            // print("Popped audio queue");
           });
 
 
 
         }
       } catch (e) {
+        print(e);
         isPlayingAudio = false;
         _audioQueue.removeAt(0);
       }
@@ -296,47 +316,73 @@ class IBus {
     }
   );
 
-  Timer locationTimer() => Timer.periodic(Duration(milliseconds: 50), (timer) async {
-    if (true){
-      isNearestStopComputing = true;
+  RouteStop? lastAnnouncedStop;
+  StreamSubscription<Position> locationSubscription() => Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5
+    )
+  ).listen((Position? position) async {
 
-      // print("Computing nearest stop...");
+    isNearestStopComputing = true;
 
-      Position devicePos = await _determinePosition();
+    this.isNearestStopComputing = true;
 
-      RouteStop? nearestStop = loginInformation?.getBusRoute()?.getNextBusStop(devicePos.latitude, devicePos.longitude);
+    RouteStop? nearestStop = loginInformation?.getBusRoute()?.getNextBusStop(position!.latitude, position.longitude);
 
-      if (nearestStop != null && (nearestStop != nearestBusStop || nearestBusStop == null)){
-        nearestBusStop = nearestStop;
+    // Check if the nearest stop has changed
+    if (nearestStop != null && (nearestStop != nearestBusStop || nearestBusStop == null)){
+      nearestBusStop = nearestStop;
 
-        print("Nearest stop: ${nearestBusStop!.stopName} updated!");
+      CurrentMessage = nearestBusStop!.getStopName_Beautified();
 
+      refresh();
+    }
+    if (nearestStop != null && nearestBusStop != null && lastAnnouncedStop != nearestBusStop) {
+      // check to see if the stop is within 100m of the nearest stop
 
-        String pth = ("${announcementDirectory}/${nearestStop.getAudioFileName()}");
+      double distance = Geolocator.distanceBetween(
+        position!.latitude,
+        position.longitude,
+        nearestBusStop!.latitude,
+        nearestBusStop!.longitude
+      );
+
+      print("Distance: $distance");
+
+      if (distance < 200){
+        lastAnnouncedStop = nearestBusStop;
+
+        String pth = ("$announcementDirectory/${nearestBusStop!.getAudioFileName()}");
 
         Source audio = DeviceFileSource(pth);
 
-        // check if file exists
         if (!await File(pth).exists()){
+
+          print("Failed file: $pth");
+
           audio = AssetSource("assets/audio/nextstopclosed.wav");
+
+          Fluttertoast.showToast(
+            msg: "Missing audio file for ${nearestBusStop!.getAudioFileName()}",
+            toastLength: Toast.LENGTH_LONG,
+            gravity: ToastGravity.CENTER,
+            timeInSecForIosWeb: 5,
+            backgroundColor: Colors.red,
+            textColor: Colors.white,
+            fontSize: 16.0
+          );
         }
 
-
-
-        print("Audio file: ${pth}");
-
         queueAnnouncement(IBusAnnouncementEntry(
-          message: beautifyString(nearestBusStop!.stopName),
+          message: nearestBusStop!.getStopName_Beautified(),
           audio: [audio],
           persist: true
         ));
-        refresh();
       }
 
-      // print("Done computing nearest stop");
-
-      isNearestStopComputing = false;
     }
+
   });
 
   String CurrentMessage = "*** NO MESSAGE ***";
@@ -351,26 +397,37 @@ class IBus {
 
     // {RouteNumber} to {Destination}
 
+    print("announcementdirectory: $announcementDirectory");
+
     AssetSource audio = AssetSource("assets/audio/to_destination.wav");
 
     RouteStop lastStop = loginInformation!.getBusRoute()!.busStops.last;
 
     BusBlindsEntry? destinationBlind = BusBlinds().getNearestBusBlind(lastStop.latitude, lastStop.longitude, loginInformation!.getBusRoute()!.routeNumber);
 
-    print("Destination file name: ${destinationBlind!.getAudioFileName()}");
 
     // get the destination audio file
 
-    print(destinationBlind!.getAudioFileName());
-
-    String Destinationpth = ("${announcementDirectory}/${destinationBlind!.getAudioFileName()}");
+    String Destinationpth = ("$announcementDirectory/${destinationBlind!.getAudioFileName()}");
     DeviceFileSource audioDestination = DeviceFileSource(Destinationpth);
 
     // get the number audio file
-    String numberPath = ("${announcementDirectory}/${loginInformation!.getBusRoute()!.getAudioFileName()}");
-    DeviceFileSource audioNumber = DeviceFileSource(numberPath);
 
-    String message = beautifyString(loginInformation!.getBusRoute()!.routeNumber) + " to " + destinationBlind.label;
+    Source audioNumber;
+
+    // check if the route number has the 'UL' prefix
+    if (loginInformation!.getBusRoute()!.routeNumber.startsWith("UL")){
+
+      // get the rail replacement route
+      audioNumber = RailReplacement().getRailReplacementRoute(loginInformation!.getBusRoute()!.routeNumber)!.getAudioFile();
+    } else {
+      String numberPath = ("$announcementDirectory/${loginInformation!.getBusRoute()!.getAudioFileName()}");
+      audioNumber = DeviceFileSource(numberPath);
+    }
+
+
+
+    String message = "${loginInformation!.getBusRoute()!.routeNumber} to ${destinationBlind.label}";
 
     if (withAudio){
       queueAnnouncement(IBusAnnouncementEntry(
@@ -390,7 +447,6 @@ class IBus {
 
   void addRefresher(Object object, Function() refreshFunction){
     _refreshFunctions[object] = refreshFunction;
-    print("Added refresh function");
     refreshFunction();
   }
 
@@ -482,7 +538,7 @@ class _ControlPanelState extends State<ControlPanel>{
     // TODO: implement initState
     super.initState();
 
-    IBus.instance.addRefresher(this, refresh);
+    IBus().addRefresher(this, refresh);
 
   }
 
@@ -632,13 +688,13 @@ class _ControlPanelState extends State<ControlPanel>{
 
 
 
-                    Expanded(child: IBus.instance.loginInformation == null ?
+                    Expanded(child: IBus().loginInformation == null ?
                     ControlPanelLogin() :
-                    IBus.instance.loginInformation?.routeVariant == -1 ?
+                    IBus().loginInformation?.routeVariant == -1 ?
                     ControlPanelRouteVarient(
 
                     ) :
-                    IBus.instance.driverInfoMode ?
+                    IBus().driverInfoMode ?
                     _staticAnnouncer() :
                     ControlPanel_BusStops()),
 
@@ -752,16 +808,16 @@ class ControlPanelLogin extends StatelessWidget {
                 ElevatedButton(
                   onPressed: () {
 
-                    IBus.instance.loginInformation = IBusLoginInformation();
+                    IBus().loginInformation = IBusLoginInformation();
 
-                    IBus.instance.loginInformation!.busGarage = BusGarages().getBusGarage(int.parse(garageController.text));
-                    IBus.instance.loginInformation!.busRoute = BusSequences().getBusRoute(routeController.text)!;
-                    IBus.instance.loginInformation!.operatingNumber = int.parse(operatingNumberController.text);
-                    IBus.instance.loginInformation!.tripNumber = int.parse(tripNumberController.text);
+                    IBus().loginInformation!.busGarage = BusGarages().getBusGarage(int.parse(garageController.text));
+                    IBus().loginInformation!.busRoute = BusSequences().getBusRoute(routeController.text)!;
+                    IBus().loginInformation!.operatingNumber = int.parse(operatingNumberController.text);
+                    IBus().loginInformation!.tripNumber = int.parse(tripNumberController.text);
 
-                    IBus.instance.CurrentMessage = IBus.instance.loginInformation!.busGarage!.garageName ?? "";
+                    IBus().CurrentMessage = IBus().loginInformation!.busGarage!.garageName ?? "";
 
-                    IBus.instance.refresh();
+                    IBus().refresh();
                   },
 
                   child: const Icon(Icons.login),
@@ -803,14 +859,14 @@ class ControlPanel_BusStops extends StatelessWidget {
 
     // All the bus stops in the route, when clicked, announce the bus stop
     int index = 1;
-    for (RouteStop stop in IBus.instance.loginInformation!.getBusRoute()!.busStops){
+    for (RouteStop stop in IBus().loginInformation!.getBusRoute()!.busStops){
       items.add(ControlPanelRightEntry(
-        label: beautifyString(stop.stopName),
+        label: stop.getStopName_Beautified(),
         index: index++,
         onPressed: () {
-          IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
-            message: beautifyString(stop.stopName),
-            audio: [DeviceFileSource("${IBus.instance.announcementDirectory}/${stop.getAudioFileName()}")],
+          IBus().queueAnnouncement(IBusAnnouncementEntry(
+            message: stop.getStopName_Beautified(),
+            audio: [DeviceFileSource("${IBus().announcementDirectory}/${stop.getAudioFileName()}")],
             delay: const Duration(milliseconds: 500)
           ));
 
@@ -828,8 +884,8 @@ class ControlPanel_BusStops extends StatelessWidget {
           // button to enable driver info mode
           ElevatedButton(
             onPressed: () {
-              IBus.instance.driverInfoMode = !IBus.instance.driverInfoMode;
-              IBus.instance.refresh();
+              IBus().driverInfoMode = !IBus().driverInfoMode;
+              IBus().refresh();
             },
 
             child: const Icon(Icons.info),
@@ -1097,8 +1153,8 @@ class _ControlPanel_ListPageState extends State<ControlPanel_ListPage> {
               ElevatedButton(
                 onPressed: () {
 
-                  IBus.instance.loginInformation = null;
-                  IBus.instance.refresh();
+                  IBus().loginInformation = null;
+                  IBus().refresh();
 
                 },
 
@@ -1120,17 +1176,14 @@ class _ControlPanel_ListPageState extends State<ControlPanel_ListPage> {
                 onPressed: () {
 
                   setState(() {
-                    print("Page before: $pageIndex");
 
                     pageIndex--;
 
-                    print("Page during: $pageIndex");
 
                     if (pageIndex < 0){
                       pageIndex = (widget.items.length / 4).ceil() - 1;
                     }
 
-                    print("Page after: $pageIndex");
                   });
 
                 },
@@ -1153,17 +1206,14 @@ class _ControlPanel_ListPageState extends State<ControlPanel_ListPage> {
                 onPressed: () {
 
                   setState(() {
-                    print("Page before: $pageIndex");
 
                     pageIndex++;
 
-                    print("Page during: $pageIndex");
 
                     if (pageIndex >= (widget.items.length / 4).ceil()){
                       pageIndex = 0;
                     }
 
-                    print("Page after: $pageIndex");
                   });
 
                 },
@@ -1203,20 +1253,25 @@ class ControlPanelRouteVarient extends StatelessWidget {
 
     List<ControlPanelRightEntry> items = [];
 
-    for (BusRoute route in IBus.instance.loginInformation!.busRoute){
+    BusSequences sequences = BusSequences();
+
+    List<BusRoute> routes = IBus().loginInformation!.busRoute;
+
+    for (BusRoute route in routes){
       items.add(ControlPanelRightEntry(
-        label: "${beautifyString(route.busStops[0].stopName)} - ${beautifyString(route.busStops.last.stopName)}",
+        label: "${route.busStops.first.getStopName_Beautified()} - ${route.busStops.last.getStopName_Beautified()}",
         index: route.routeVariant,
         onPressed: () {
-          IBus.instance.loginInformation!.routeVariant = route.routeVariant;
+          IBus().loginInformation!.routeVariant = route.routeVariant;
+
+          IBus().refresh();
 
           // {RouteNumber} to {Destination}
 
 
 
-          IBus.instance.announceDestination();
+          IBus().announceDestination();
 
-          print("Log in completed.");
         },
       ));
     }
@@ -1256,7 +1311,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 1,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
               message: "Driver Change",
               audio: [AssetSource("assets/audio/driverchange.mp3")]
             ));
@@ -1277,7 +1332,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 2,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "No standing on upper deck",
                 audio: [AssetSource("assets/audio/nostanding.mp3")]
             ));
@@ -1298,7 +1353,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 3,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Please wear a face covering!",
                 audio: [AssetSource("assets/audio/facecovering.mp3")]
             ));
@@ -1319,7 +1374,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 4,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Seats are available upstairs",
                 audio: [AssetSource("assets/audio/seatsupstairs.mp3")]
             ));
@@ -1339,7 +1394,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 5,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Bus terminates here. Please take your belongings with you",
                 audio: [AssetSource("assets/audio/busterminateshere.mp3")]
             ));
@@ -1359,7 +1414,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 6,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Bus on diversion. Please listen for further announcements",
                 audio: [AssetSource("assets/audio/busondiversion.mp3")]
             ));
@@ -1380,7 +1435,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 7,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Destination Changed - please listen for further instructions",
                 audio: [AssetSource("assets/audio/destinationchange.mp3")]
             ));
@@ -1400,7 +1455,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 8,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Wheelchair space requested",
                 audio: [AssetSource("assets/audio/wheelchairspace1.mp3")]
             ));
@@ -1420,7 +1475,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 9,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Please move down the bus",
                 audio: [AssetSource("assets/audio/movedownthebus.mp3")]
             ));
@@ -1440,7 +1495,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 10,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "The next bus stop is closed",
                 audio: [AssetSource("assets/audio/nextstopclosed.wav")]
             ));
@@ -1460,7 +1515,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 11,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "CCTV is in operation on this bus",
                 audio: [AssetSource("assets/audio/cctvoperation.mp3")]
             ));
@@ -1480,7 +1535,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 12,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Driver will open the doors when it is safe to do so",
                 audio: [AssetSource("assets/audio/safedooropening.mp3")]
             ));
@@ -1500,7 +1555,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 13,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "For your child's safety, please remain with your buggy",
                 audio: [AssetSource("assets/audio/buggysafety.mp3")]
             ));
@@ -1520,7 +1575,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 14,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Wheelchair priority space required",
                 audio: [AssetSource("assets/audio/wheelchairspace2.mp3")]
             ));
@@ -1540,7 +1595,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 15,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "Regulating service - please listen for further information",
                 audio: [AssetSource("assets/audio/serviceregulation.mp3")]
             ));
@@ -1560,7 +1615,7 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
           index: 16,
 
           onPressed: () {
-            IBus.instance.queueAnnouncement(IBusAnnouncementEntry(
+            IBus().queueAnnouncement(IBusAnnouncementEntry(
                 message: "This bus is ready to depart",
                 audio: [AssetSource("assets/audio/readytodepart.mp3")]
             ));
@@ -1629,8 +1684,8 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
                 onPressed: () {
 
                   setState(() {
-                    IBus.instance.loginInformation = null;
-                    IBus.instance.refresh();
+                    IBus().loginInformation = null;
+                    IBus().refresh();
                   });
 
                 },
@@ -1653,17 +1708,14 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
                 onPressed: () {
 
                   setState(() {
-                    print("Page before: $pageIndex");
 
                     pageIndex--;
 
-                    print("Page during: $pageIndex");
 
                     if (pageIndex < 0){
                       pageIndex = pages.length - 1;
                     }
 
-                    print("Page after: $pageIndex");
                   });
 
                 },
@@ -1686,18 +1738,15 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
                 onPressed: () {
 
                   setState(() {
-                    print("Page before: $pageIndex");
 
                     pageIndex++;
 
-                    print("Page during: $pageIndex");
 
 
                     if (pageIndex >= pages.length){
                       pageIndex = 0;
                     }
 
-                    print("Page after: $pageIndex");
                   });
 
                 },
@@ -1719,8 +1768,8 @@ class _staticAnnouncerState extends State<_staticAnnouncer> {
               // button to disable driver info mode
               ElevatedButton(
                 onPressed: () {
-                  IBus.instance.driverInfoMode = !IBus.instance.driverInfoMode;
-                  IBus.instance.refresh();
+                  IBus().driverInfoMode = !IBus().driverInfoMode;
+                  IBus().refresh();
                 },
 
                 child: const Icon(Icons.bus_alert),
@@ -1837,7 +1886,7 @@ class ControlPanelRightEntry extends StatelessWidget {
             padding: const EdgeInsets.all(8),
 
             child: Text(
-              "${index}",
+              "$index",
               style: TextStyle(
                 fontFamily: "LCD",
                 fontSize: 23,

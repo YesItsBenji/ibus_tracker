@@ -1,7 +1,9 @@
 
 import 'dart:math';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:csv/csv.dart';
 import 'package:ibus_tracker/main.dart';
+import 'package:intl/intl.dart';
 import 'package:vector_math/vector_math.dart';
 import 'NorthingsNEastings.dart';
 
@@ -39,7 +41,14 @@ class BusSequences {
 
       // print("rowRouteVariant: ${entries[1]}");
 
-      int rowRouteVariant = entries[1];
+      int rowRouteVariant = -1;
+
+      try {
+        rowRouteVariant = entries[1];
+      } catch (e) {
+        print("Error on line $line");
+        continue;
+      }
 
       // if the route varient is -1, we are on the first row.
       if (route.routeVariant == -1) {
@@ -165,17 +174,10 @@ class BusRoute {
     double relativeDistance = nearestStop.calculateRelativeDistance(latitude, longitude);
     double actualDistance = _calculateDistance(latitude, longitude, nearestStop.latitude, nearestStop.longitude);
 
-    print("Distance to ${nearestStop.stopName}: $relativeDistance ;; $actualDistance");
-    print("comparing coords: $latitude, $longitude to ${nearestStop.latitude}, ${nearestStop.longitude}");
-
-
     // If the relative distance is negative, the coordinates have passed the stop
     if (relativeDistance < 0) {
 
       int stopIndex = busStops.indexOf(nearestStop);
-
-      print("Bus has passed stop ${nearestStop.stopName}");
-      print("Coords: $latitude, $longitude");
 
       // use min function to prevent index out of bounds error
       return busStops[min(stopIndex + 1, busStops.length - 1)];
@@ -253,26 +255,40 @@ class RouteStop {
   // Earth's radius in kilometers
   static const double R = 6371;
 
+  String getStopName_Beautified() {
+    return NameBeutify.beautifyStopName(stopName);
+  }
+
   double calculateRelativeDistance(double latitude, double longitude) {
 
     Vector2 stopPoint = OSGrid.toNorthingEasting(this.latitude, this.longitude);
     Vector2 currentPoint = OSGrid.toNorthingEasting(latitude, longitude);
 
-    // calculate the heading from the stop to the current point
-    double heading = degrees(atan2(currentPoint.y - stopPoint.y, currentPoint.x - stopPoint.x));
+    // calculate the heading from the current point to the stop point
+    // 0 degrees is north, 90 degrees is east, 180 degrees is south, 270 degrees is west
+    double toHeading = degrees(atan2(stopPoint.x - currentPoint.x, stopPoint.y - currentPoint.y));
+    toHeading = (toHeading + 360) % 360;
 
-    // convert to 360 degrees
-    heading = (heading + 360) % 360;
 
     // get the dot product of the heading and the stop heading
-    double dotProduct = cos(radians(heading)) * cos(radians(this.heading)) + sin(radians(heading)) * sin(radians(this.heading));
-
+    double dotProduct = cos(radians(toHeading)) * cos(radians(this.heading)) + sin(radians(toHeading)) * sin(radians(this.heading));
+    print("====================================");
     print(" ");
-    print("Heading: $heading");
+    print("Bus stop: $stopName");
+    print(" ");
+    print("Coordinates: $latitude, $longitude");
+    print(" ");
+    print("Heading to bus stop: $toHeading");
+    print("Bus stop heading: ${this.heading}");
+    print(" ");
+    print("Bus stop point: $stopPoint");
+    print("Current point: $currentPoint");
+    print(" ");
     print("Dot product: $dotProduct");
     print(" ");
+    print("====================================");
 
-    return dotProduct.sign * _calculateDistance(latitude, longitude, this.latitude, this.longitude);
+    return (dotProduct.sign) * _calculateDistance(latitude, longitude, this.latitude, this.longitude);
 
   }
 
@@ -281,7 +297,10 @@ class RouteStop {
     // Convert the stop name to all caps
     String stopName = this.stopName.toUpperCase();
 
-    stopName = beautifyString(stopName);
+    stopName = NameBeutify.beautifyStopName(stopName);
+
+    // replace & with N
+    stopName = stopName.replaceAll('&', 'N');
 
     stopName = stopName.replaceAll('/', '');
 
@@ -383,14 +402,13 @@ class BusStops {
 }
 
 double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-  const int radius = 6371; // radius of earth in Km
-  final dLat = _degreeToRadian(lat2 - lat1);
-  final dLon = _degreeToRadian(lon2 - lon1);
-  final a = sin(dLat / 2) * sin(dLat / 2)
-      + cos(_degreeToRadian(lat1)) * cos(_degreeToRadian(lat2)) * sin(dLon / 2) * sin(dLon / 2);
-  final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-  final distance = radius * c;
-  return distance * 1000; // convert to meters
+
+  // Convert to eastings and northings
+  Vector2 point1 = OSGrid.toNorthingEasting(lat1, lon1);
+  Vector2 point2 = OSGrid.toNorthingEasting(lat2, lon2);
+
+  return point1.distanceTo(point2);
+
 }
 
 double _degreeToRadian(double degree) {
@@ -416,7 +434,7 @@ class BusStop {
     // Convert the stop name to all caps
     String stopName = this.stopName.toUpperCase();
 
-    stopName = beautifyString(stopName);
+    stopName = NameBeutify.beautifyStopName(stopName);
 
     stopName = stopName.replaceAll('/', '');
 
@@ -603,7 +621,7 @@ class BusBlindsEntry {
     // Convert the stop name to all caps
     String stopName = label.toUpperCase();
 
-    stopName = beautifyString(stopName);
+    stopName = NameBeutify.beautifyStopName(stopName);
 
     stopName = stopName.replaceAll('/', '');
 
@@ -621,6 +639,161 @@ class BusBlindsEntry {
 
     return "D_${stopName}_001.mp3";
 
+  }
+
+}
+
+class RailReplacement {
+
+  // Singleton
+  static final RailReplacement _instance = RailReplacement._internal();
+
+  factory RailReplacement() {
+    return _instance;
+  }
+
+  RailReplacement._internal();
+
+  Map<String, RailReplacementRoute> routes = {};
+
+  static RailReplacement fromCSV(String csv) {
+
+    RailReplacement railReplacement = RailReplacement();
+
+    List<List<dynamic>> rowsAsListOfValues = const CsvToListConverter().convert(csv);
+
+    rowsAsListOfValues.removeAt(0);
+
+    for (List<dynamic> entries in rowsAsListOfValues) {
+
+      RailReplacementRoute route = RailReplacementRoute();
+
+      route.routeNumber = entries[0];
+      route.routeDescription = entries[1];
+      route.routeLine = entries[2];
+
+      railReplacement.routes[route.routeNumber] = route;
+
+    }
+
+    return railReplacement;
+
+  }
+
+  RailReplacementRoute? getRailReplacementRoute(String routeNumber) {
+
+    if (routes.containsKey(routeNumber)) {
+      return routes[routeNumber];
+    }
+
+    return null;
+
+  }
+
+}
+
+class RailReplacementRoute {
+
+  String routeNumber = "";
+
+  String routeDescription = "";
+
+  String routeLine = "";
+
+  AssetSource getAudioFile() {
+
+    // Convert the stop name to all caps
+    String stopName = routeLine.toUpperCase();
+
+    stopName = NameBeutify.beautifyStopName(stopName);
+
+    stopName = stopName.replaceAll('/', '');
+
+    stopName = stopName.replaceAll('\'', '');
+
+    stopName = stopName.replaceAll('  ', ' ');
+
+    // Replace space with underscore
+    stopName = stopName.replaceAll(' ', '_');
+
+    // Replace & with N
+    stopName = stopName.replaceAll('&', 'N');
+
+    // convert to all caps
+    stopName = stopName.toUpperCase();
+
+    print("assets/audio/rail_replacement/$stopName.mp3");
+
+    return AssetSource("assets/audio/rail_replacement/$stopName.mp3");
+
+
+  }
+
+}
+
+
+class NameBeutify {
+
+  static final Map<String, String> Longify = {
+
+    "ctr": "Centre",
+    "stn": "Station",
+    "tn": "Town",
+
+  };
+
+  static String beautifyStopName(String label) {
+
+    String stopName = label.toUpperCase();
+
+    // remove <>
+    stopName = stopName.replaceAll("<>", "");
+
+    // remove any parathesese pairs as well as the contents (), [], {}, <>, ><
+    stopName = stopName.replaceAll(RegExp(r'\(.*\)'), '');
+    stopName = stopName.replaceAll(RegExp(r'\[.*\]'), '');
+    stopName = stopName.replaceAll(RegExp(r'\{.*\}'), '');
+    // stopName = stopName.replaceAll(RegExp(r'\<.*\>'), '');
+    stopName = stopName.replaceAll(RegExp(r'\>.*\<'), '');
+
+
+    // remove any special characters except & and /
+    stopName = stopName.replaceAll(RegExp(r'[^a-zA-Z0-9&/ ]'), '');
+
+    // remove any double spaces
+    stopName = stopName.replaceAll(RegExp(r'  '), ' ');
+
+    // remove any spaces at the start or end of the string
+    stopName = stopName.trim();
+
+    // replace any short words with their long form
+    for (String phrase in Longify.keys) {
+      stopName = stopName.replaceAll(RegExp(phrase, caseSensitive: false), Longify[phrase]!);
+    }
+
+
+    stopName = stopName.toLowerCase();
+    // Capitalify the first letter of each word
+    try {
+      stopName = stopName.split(' ').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
+    } catch (e) {}
+
+    return stopName;
+
+  }
+
+  static String getShortTime(){
+
+    // return the HH:MM with AM and PM and make sure that the hour is 12 hour format and it always double digits. IE 01, 02 etc
+    DateTime now = DateTime.now();
+    String formatted = DateFormat('hh:mm a').format(now);
+    return formatted;
+  }
+
+  static String getLongTime() {
+    DateTime now = DateTime.now();
+    String formattedTime = DateFormat('HH:mm:ss  dd.MM.yyyy').format(now);
+    return formattedTime;
   }
 
 }
