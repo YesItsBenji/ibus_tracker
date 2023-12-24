@@ -193,22 +193,6 @@ class BusRoute {
     return "Route: $routeNumber: ${busStops[0].stopName} - ${busStops.last.stopName} ";
   }
 
-  List<BusBlindsEntry>? getBusBlinds(){
-
-    // try {
-
-      return BusBlinds().destinations[routeNumber];
-
-    // } catch (e) {
-    //
-    //
-    //
-    //   return null;
-    //
-    // }
-
-  }
-
   String getAudioFileName() {
 
     return "R_${routeNumber}_001.mp3";
@@ -522,7 +506,6 @@ class BusGarage {
 
 }
 
-
 class BusBlinds {
 
   // Singleton
@@ -586,10 +569,14 @@ class BusBlinds {
 
       BusBlindsEntry blindsEntry = BusBlindsEntry();
 
-      blindsEntry.route = route;
-      blindsEntry.label = blind;
-      blindsEntry.latitude = entries[2].toDouble();
-      blindsEntry.longitude = entries[3].toDouble();
+      try {
+        blindsEntry.route = route;
+        blindsEntry.label = blind;
+        blindsEntry.latitude = entries[2].toDouble();
+        blindsEntry.longitude = entries[3].toDouble();
+      } catch (e) {
+
+      }
 
       // print("Blinds: $blind ${blindsEntry.latitude} ${blindsEntry.longitude}");
 

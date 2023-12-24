@@ -42,7 +42,7 @@ class DotMatrix extends StatelessWidget {
 
             },
 
-            message: "WALTHAMSTOW AVENUE",
+            message: "Vanilla Studios",
 
           ),
           _dotMatrixLine(

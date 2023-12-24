@@ -73,7 +73,9 @@ class HomePageState extends State<HomePage> {
       DeviceOrientation.landscapeLeft,
     ]);
 
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.leanBack);
+    // Hide the notification bar and the navigation bar
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
+
 
   }
 
@@ -259,6 +261,9 @@ class HomePageState extends State<HomePage> {
 
       body: Container(
         alignment: Alignment.center,
+
+        color: Colors.black,
+
         child: Container(
 
           height: 150,

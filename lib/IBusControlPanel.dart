@@ -1,7 +1,7 @@
 
 import 'dart:async';
 import 'dart:io';
-
+import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
@@ -158,6 +158,8 @@ class IBus {
 
     announcementTimer();
 
+    LoadDatasets();
+
     AudioCache.instance.prefix = "";
 
     prefCallback(SharedPreferences pref) {
@@ -193,18 +195,30 @@ class IBus {
     } else {
       SharedPreferences.getInstance().then(prefCallback);
     }
+  }
 
-
-
-
+  void LoadDatasets(){
 
     rootBundle.loadString("assets/garage_codes.csv").then((value) {
       BusGarages.fromCSV(value);
       refresh();
     });
 
-    rootBundle.loadString("assets/bus-sequences.csv").then((value) {
-      BusSequences sequences = BusSequences.fromCSV(value);
+    // Read string from url = https://tfl.gov.uk/bus-sequences.csv
+
+    http.get(Uri.parse('https://tfl.gov.uk/bus-sequences.csv')).then((value) {
+      BusSequences sequences = BusSequences.fromCSV(value.body);
+      refresh();
+    }).catchError((e){
+      rootBundle.loadString("assets/bus-sequences.csv").then((value) {
+        BusBlinds sequences = BusBlinds.fromCSV(value);
+        refresh();
+      });
+    });
+
+
+    rootBundle.loadString("assets/bus-blinds.csv").then((value) {
+      BusBlinds sequences = BusBlinds.fromCSV(value);
       refresh();
     });
 
@@ -212,13 +226,10 @@ class IBus {
       BusStops.fromCSV(value);
     });
 
-    rootBundle.loadString("assets/bus-blinds.csv").then((value) {
-      BusBlinds.fromCSV(value);
-    });
-
     rootBundle.loadString("assets/rail-replacement.csv").then((value) {
       RailReplacement.fromCSV(value);
     });
+
   }
 
   // Audio loop queue
@@ -402,14 +413,16 @@ class IBus {
     AssetSource audio = AssetSource("assets/audio/to_destination.wav");
 
     RouteStop lastStop = loginInformation!.getBusRoute()!.busStops.last;
-
     BusBlindsEntry? destinationBlind = BusBlinds().getNearestBusBlind(lastStop.latitude, lastStop.longitude, loginInformation!.getBusRoute()!.routeNumber);
 
 
     // get the destination audio file
 
-    String Destinationpth = ("$announcementDirectory/${destinationBlind!.getAudioFileName()}");
+    // String Destinationpth = ("$announcementDirectory/${loginInformation?.getBusRoute()?.busStops.last.getAudioFileName()}");
+    String Destinationpth = ("$announcementDirectory/${destinationBlind?.getAudioFileName()}");
     DeviceFileSource audioDestination = DeviceFileSource(Destinationpth);
+
+    String DestinationName = destinationBlind!.label;
 
     // get the number audio file
 
@@ -425,9 +438,7 @@ class IBus {
       audioNumber = DeviceFileSource(numberPath);
     }
 
-
-
-    String message = "${loginInformation!.getBusRoute()!.routeNumber} to ${destinationBlind.label}";
+    String message = "${loginInformation!.getBusRoute()!.routeNumber} to ${DestinationName}";
 
     if (withAudio){
       queueAnnouncement(IBusAnnouncementEntry(
@@ -810,8 +821,10 @@ class ControlPanelLogin extends StatelessWidget {
 
                     IBus().loginInformation = IBusLoginInformation();
 
-                    IBus().loginInformation!.busGarage = BusGarages().getBusGarage(int.parse(garageController.text));
-                    IBus().loginInformation!.busRoute = BusSequences().getBusRoute(routeController.text)!;
+                    BusGarages garages = BusGarages();
+
+                    IBus().loginInformation!.busGarage = garages.getBusGarage(int.parse(garageController.text));
+                    IBus().loginInformation!.busRoute = BusSequences().getBusRoute(routeController.text.toUpperCase())!;
                     IBus().loginInformation!.operatingNumber = int.parse(operatingNumberController.text);
                     IBus().loginInformation!.tripNumber = int.parse(tripNumberController.text);
 
